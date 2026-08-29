@@ -26,6 +26,7 @@ from .sensors import (
     PAISensor,
     WebhookUrlSensor,
     SleepScoreSensor,
+    SleepStageDurationSensor,
     RawDataSensor,
     SENSOR_DEFINITIONS,
     SENSORS_WITH_TARGET,
@@ -79,6 +80,9 @@ async def async_setup_entry(
         BloodOxygenSensor(coordinator),
         PAISensor(coordinator),
         SleepScoreSensor(coordinator),
+        SleepStageDurationSensor(coordinator, key="sleep_rem", name="Sleep REM", stage_name="REM_STAGE", icon="mdi:brain"),
+        SleepStageDurationSensor(coordinator, key="sleep_light", name="Sleep Light", stage_name="LIGHT_STAGE", icon="mdi:weather-partly-cloudy"),
+        SleepStageDurationSensor(coordinator, key="sleep_awake", name="Sleep Awake", stage_name="WAKE_STAGE", icon="mdi:eye-outline"),
         RawDataSensor(coordinator),
         # Diagnostic sensor for webhook URL
         # WebhookUrlSensor(hass, entry.entry_id, device_name, webhook_url),

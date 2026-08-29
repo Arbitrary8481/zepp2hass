@@ -94,3 +94,86 @@ class SleepScoreSensor(ZeppSensorBase):
             attributes["naps"] = naps
             
         return attributes
+
+
+def get_sleep_stage_duration(section: dict[str, Any], target_stage_name: str) -> int | None:
+    """Calculate total minutes for a specific sleep stage name."""
+    if not section:
+        return None
+    
+    info = section.get("info", {})
+    key_map = {
+        "REM_STAGE": ["remTime", "rem_time", "rem"],
+        "LIGHT_STAGE": ["lightTime", "light_time", "light", "shallowTime"],
+        "WAKE_STAGE": ["wakeTime", "wake_time", "wake", "awakeTime"],
+        "DEEP_STAGE": ["deepTime", "deep_time", "deep"],
+    }
+    
+    for key in key_map.get(target_stage_name, []):
+        if key in info and info[key] is not None:
+            return info[key]
+            
+    # Calculate dynamically from sleep.stage and stg_list if not present in info
+    stg_list = section.get("stg_list", {})
+    stages = section.get("stage", [])
+    
+    if not stages or not stg_list:
+        return 0
+        
+    target_model_id = stg_list.get(target_stage_name)
+    if target_model_id is None:
+        return 0
+        
+    total_minutes = 0
+    for stage in stages:
+        if stage.get("model") == target_model_id:
+            start = stage.get("start")
+            stop = stage.get("stop")
+            if start is not None and stop is not None:
+                duration = stop - start if stop >= start else (1440 - start) + stop
+                total_minutes += duration
+                
+    return total_minutes
+
+
+from homeassistant.components.sensor import SensorDeviceClass
+
+class SleepStageDurationSensor(ZeppSensorBase):
+    """Sensor for specific sleep stage duration (REM, Light, Wake, Deep)."""
+
+    _SECTION = DataSection.SLEEP
+
+    def __init__(
+        self,
+        coordinator: ZeppDataUpdateCoordinator,
+        key: str,
+        name: str,
+        stage_name: str,
+        icon: str,
+    ) -> None:
+        """Initialize sleep stage duration sensor."""
+        super().__init__(
+            coordinator=coordinator,
+            key=key,
+            name=name,
+            icon=icon,
+            unit="min",
+        )
+        self._stage_name = stage_name
+        self._attr_device_class = SensorDeviceClass.DURATION
+        self._attr_state_class = SensorStateClass.MEASUREMENT
+
+    @property
+    def available(self) -> bool:
+        """Return True if coordinator is ready and sleep section exists."""
+        if not self._is_coordinator_ready():
+            return False
+        section = self._get_section(self._SECTION)
+        return bool(section and ("info" in section or "stage" in section))
+
+    @property
+    def native_value(self) -> int | None:
+        """Calculate and return duration in minutes."""
+        section = self._get_section(self._SECTION)
+        return get_sleep_stage_duration(section, self._stage_name)
+

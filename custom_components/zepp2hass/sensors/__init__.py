@@ -31,7 +31,7 @@ from .device import DeviceInfoSensor
 from .pai import PAISensor
 from .user import UserInfoSensor
 from .webhook import WebhookUrlSensor
-from .sleep import SleepScoreSensor
+from .sleep import SleepScoreSensor, SleepStageDurationSensor
 from .raw import RawDataSensor
 from .workout import (
     WorkoutHistorySensor,
@@ -71,6 +71,7 @@ __all__ = [
     "UserInfoSensor",
     "WebhookUrlSensor",
     "SleepScoreSensor",
+    "SleepStageDurationSensor",
     "RawDataSensor",
     "WorkoutHistorySensor",
     "WorkoutLastSensor",
