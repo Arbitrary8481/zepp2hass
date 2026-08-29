@@ -77,10 +77,15 @@ class SleepScoreSensor(ZeppSensorBase):
                 start_dt = format_sleep_time(start) if start is not None else None
                 stop_dt = format_sleep_time(stop) if stop is not None else None
                 
+                duration_min = None
+                if start is not None and stop is not None:
+                    duration_min = stop - start if stop >= start else (1440 - start) + stop
+                
                 formatted_stages.append({
                     "phase": phase_name,
                     "start": start_dt.isoformat() if start_dt else None,
                     "stop": stop_dt.isoformat() if stop_dt else None,
+                    "duration_min": duration_min,
                 })
             
             attributes["stages"] = formatted_stages

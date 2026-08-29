@@ -8,9 +8,29 @@ This module provides:
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta, date, timezone
 from functools import lru_cache
 from typing import Any, Callable, Protocol, TypeVar
+
+try:
+    from homeassistant.util import dt as dt_util
+except ImportError:
+    class DummyDtUtil:
+        @staticmethod
+        def now():
+            return datetime.now().astimezone()
+        @staticmethod
+        def start_of_local_day(dt=None):
+            if dt is None:
+                dt = datetime.now().astimezone()
+            return dt.replace(hour=0, minute=0, second=0, microsecond=0)
+        @staticmethod
+        def utc_from_timestamp(ts):
+            return datetime.fromtimestamp(ts, tz=timezone.utc)
+        @staticmethod
+        def as_local(dt):
+            return dt.astimezone()
+    dt_util = DummyDtUtil()
 
 from .mappings import GENDER_MAP, SPORT_TYPE_MAP
 
@@ -71,33 +91,31 @@ def get_nested_value(data: dict[str, Any], path: str) -> tuple[Any, bool]:
 
 
 class MidnightCache:
-    """Cache for yesterday's midnight calculation (invalidated daily)."""
+    """Cache for today's local midnight calculation (invalidated daily)."""
 
-    __slots__ = ("_cached_date", "_cached_midnight")
+    __slots__ = ("_cached_date", "_cached_today_midnight")
 
     def __init__(self) -> None:
         """Initialize empty cache."""
         self._cached_date: date | None = None
-        self._cached_midnight: datetime | None = None
+        self._cached_today_midnight: datetime | None = None
 
-    def get_yesterday_midnight(self) -> datetime:
-        """Get yesterday's midnight datetime.
+    def get_today_midnight(self) -> datetime:
+        """Get today's local midnight datetime in HA configured timezone.
 
         Results are cached per day for performance.
         """
-        today = date.today()
+        now = dt_util.now()
+        today = now.date()
 
-        if self._cached_date == today and self._cached_midnight is not None:
-            return self._cached_midnight
+        if self._cached_date == today and self._cached_today_midnight is not None:
+            return self._cached_today_midnight
 
-        now = datetime.now().astimezone()
-        today_midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        yesterday_midnight = today_midnight - timedelta(days=1)
-
+        today_midnight = dt_util.start_of_local_day(now)
         self._cached_date = today
-        self._cached_midnight = yesterday_midnight
+        self._cached_today_midnight = today_midnight
 
-        return yesterday_midnight
+        return today_midnight
 
 
 # Module-level cache instance
@@ -105,10 +123,10 @@ _midnight_cache = MidnightCache()
 
 
 def format_timestamp(timestamp_ms: int | float) -> datetime:
-    """Convert millisecond timestamp to datetime.
+    """Convert millisecond timestamp to datetime in HA local timezone.
 
     Args:
-        timestamp_ms: Unix timestamp in milliseconds
+        timestamp_ms: Unix timestamp in seconds or milliseconds
 
     Returns:
         Local datetime object
@@ -117,8 +135,10 @@ def format_timestamp(timestamp_ms: int | float) -> datetime:
         ValueError: If timestamp cannot be converted
     """
     try:
-        return datetime.fromtimestamp(timestamp_ms / 1000 if timestamp_ms > 1e12 else timestamp_ms)
-    except (OSError, OverflowError) as exc:
+        ts = timestamp_ms / 1000 if timestamp_ms > 1e12 else timestamp_ms
+        utc_dt = dt_util.utc_from_timestamp(ts)
+        return dt_util.as_local(utc_dt)
+    except (OSError, OverflowError, ValueError) as exc:
         raise ValueError(f"Invalid timestamp: {timestamp_ms}") from exc
 
 
@@ -234,12 +254,29 @@ def format_body_temp(value: Any) -> float | Any:
 def format_sleep_time(value: Any) -> datetime | Any:
     """Format sleep start/end time from minutes since midnight to datetime.
 
-    Sleep times are stored as minutes from midnight of the previous day.
+    Converts sleep minutes (or epoch timestamps) to Home Assistant's local timezone.
+    If the candidate time today is in the future (> now + 30m), it refers to yesterday.
     Returns a timezone-aware datetime object for Home Assistant TIMESTAMP sensors.
     """
+    if value is None:
+        return None
+
     if isinstance(value, (int, float)):
-        yesterday_midnight = _midnight_cache.get_yesterday_midnight()
-        return yesterday_midnight + timedelta(minutes=int(value))
+        # Handle full Unix timestamps (in seconds or milliseconds)
+        if value > 10000:
+            return format_timestamp(value)
+
+        # Minutes since midnight (0 to 1440)
+        today_midnight = _midnight_cache.get_today_midnight()
+        candidate_today = today_midnight + timedelta(minutes=int(value))
+        now = dt_util.now()
+
+        # If candidate time today is in the future (> now + 30 mins), it belongs to yesterday
+        if candidate_today > now + timedelta(minutes=30):
+            return candidate_today - timedelta(days=1)
+
+        return candidate_today
+
     return value
 
 
